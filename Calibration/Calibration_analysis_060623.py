@@ -166,21 +166,21 @@ class Calibration_analysis:
         Central_wavelength_fwhm, Gaus_params_fwhm, Signal_fit_fwhm, Signal_sum_fwhm = self.process_image(self.FWHM_image, calibration_region)
         Central_wavelength_align, Gaus_params_align, Signal_fit_align, Signal_sum_align = self.process_image(self.Alignment_image, calibration_region)
 
-        Central_wavelength = Central_wavelength_align
+        self.Central_wavelength = Central_wavelength_align
         popt_gaus = Gaus_params_fwhm
 
-        FWHM = 2 * np.sqrt(2 * np.log(2)) * popt_gaus[-1]
+        self.FWHM = 2 * np.sqrt(2 * np.log(2)) * popt_gaus[-1]
         Input_FWHM = popt_gaus[-1]
         
-        print('Central wavelength = {:.6g} nm'.format(Central_wavelength))
-        print('Instrument FWHM = {:.4g} nm'.format(FWHM))
+        print('Central wavelength = {:.6g} nm'.format(self.Central_wavelength))
+        print('Instrument FWHM = {:.4g} nm'.format(self.FWHM))
         ## The GG OTS code takes the Gaussian sigma as input for FWHM
         print('GG OTS Code FWHM input = {:.4g} nm'.format(Input_FWHM))
-
+        
         if Save_bool:
             with open(os.path.join(Parent_loc, f'{Diagnostic}_calibration_info.txt'), 'w') as f:
-                f.write(f'Central wavelength = {Central_wavelength:.6g} nm\n')
-                f.write(f'Instrument FWHM = {FWHM:.4g} nm\n')
+                f.write(f'Central wavelength = {self.Central_wavelength:.6g} nm\n')
+                f.write(f'Instrument FWHM = {self.FWHM:.4g} nm\n')
             f.close()
 
         if plot == True:
@@ -224,7 +224,7 @@ class Calibration_analysis:
                 a.minorticks_on()
                 a.tick_params(axis='both', which='major', length=10, direction='in', top=True, right=True)
                 a.tick_params(axis='both', which='minor', length=5, direction='in', top=True, right=True)
-                a.set_xlim(Central_wavelength-s, Central_wavelength+s)
+                a.set_xlim(self.Central_wavelength-s, self.Central_wavelength+s)
             for a in axs[0, :].flat:
                 a.tick_params(which='both', color='white')
                 a.set_ylim(calibration_region[0]+100, calibration_region[1]+25) 
