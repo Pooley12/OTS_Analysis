@@ -171,17 +171,6 @@ class Calibration_analysis:
 
         self.FWHM = 2 * np.sqrt(2 * np.log(2)) * popt_gaus[-1]
         Input_FWHM = popt_gaus[-1]
-        
-        print('Central wavelength = {:.6g} nm'.format(self.Central_wavelength))
-        print('Instrument FWHM = {:.4g} nm'.format(self.FWHM))
-        ## The GG OTS code takes the Gaussian sigma as input for FWHM
-        print('GG OTS Code FWHM input = {:.4g} nm'.format(Input_FWHM))
-        
-        if Save_bool:
-            with open(os.path.join(Parent_loc, f'{Diagnostic}_calibration_info.txt'), 'w') as f:
-                f.write(f'Central wavelength = {self.Central_wavelength:.6g} nm\n')
-                f.write(f'Instrument FWHM = {self.FWHM:.4g} nm\n')
-            f.close()
 
         if plot == True:
             if Diagnostic == 'IAW':
@@ -317,6 +306,17 @@ class Calibration_analysis:
 #%%
 if __name__ == "__main__":
     ## Run the calibration analysis
-    calibration_analysis = Calibration_analysis()
-    print("Calibration analysis completed.")
+    Calibration = Calibration_analysis()
+
+    print('Central wavelength = {:.6g} nm'.format(Calibration.Central_wavelength))
+    print('Instrument FWHM = {:.4g} nm'.format(Calibration.FWHM))
+    ## The GG OTS code takes the Gaussian sigma as input for FWHM
+    print('GG OTS Code FWHM input = {:.4g} nm'.format(Calibration.FWHM/(2 * np.sqrt(2 * np.log(2)))))
+    
+    if Save_bool:
+        with open(os.path.join(Parent_loc, f'{Diagnostic}_calibration_info.txt'), 'w') as f:
+            f.write(f'Central wavelength = {Calibration.Central_wavelength:.6g} nm\n')
+            f.write(f'Instrument FWHM = {Calibration.FWHM:.4g} nm\n')
+        f.close()
+
     plt.show()
