@@ -27,8 +27,18 @@ from scipy.optimize import curve_fit
 Shot_day = 'OMEGA_Jun2023'
 Shot_number = 0
 Diagnostic = 'IAW'
+
 ## If using TDYNO_NLUF Box account, User as required in Parent_loc
 User = 'hpoole'
+
+## Example shot number, used for finding the spectrometer central wavelength
+## This feature can be switched off by setting Experimental_shot = 0
+## NB: It is not critical for this script to have the correct spectrometer center wavelength,
+## as this will evaluated during the data extraction.
+Experimental_shot = 108617
+
+## If you want to save output figures and info
+Save_bool = True
 
 ###############################################################
 
@@ -37,23 +47,279 @@ User = 'hpoole'
 ##                      FILE LOCATIONS                       ##
 ##                                                           ##
 ###############################################################
+Global_loc = os.path.join('/', 'Users', User, 'Library', 'CloudStorage', 'Box-Box', 'TDYNO_NLUF', 'OMEGA', Shot_day, 'Data')
+Parent_loc = os.path.join(Global_loc, str(Shot_number), Diagnostic)
 
-Parent_loc = os.path.join('/', 'Users', User, 'Library', 'CloudStorage', 'Box-Box', 'TDYNO_NLUF', 'OMEGA', Shot_day, 'Data', f'{Shot_number}', Diagnostic)
-
+## Define the calibration files
+## FWHM_file_loc: This file provides the FWHM calibration data
+## Alignment_file_loc: This file provides the alignment calibration data
+## NB: Ideally, these files are the same, but often not..
 if Diagnostic == 'IAW':
-    File_loc = os.path.join(Parent_loc, 'IAW_532_1o_532cw_500um_121p71_270.hdf')
+    FWHM_file_loc = os.path.join(Parent_loc, 'IAW_532_1o_532cw_500um_121p71_270.hdf')
+    Alignment_file_loc = FWHM_file_loc
 elif Diagnostic == 'EPW':
-    ## The EPW has two calibration files (due to error on the day)
-    ## This file provides the FWHM
-    File_loc = os.path.join(Parent_loc, 'EPW_FWHM_100um_263p5cw_ross_150ph.hdf')
-    ## This file provides the alignment calibration
-    # file_loc = os.path.join(parent_loc, 'EPW_align_532_1o_527cw_500um_121p71_270.hdf')
+    FWHM_file_loc = os.path.join(Parent_loc, 'EPW_FWHM_100um_263p5cw_ross_150ph.hdf')
+    Alignment_file_loc = os.path.join(Parent_loc, 'EPW_align_532_1o_527cw_500um_121p71_270.hdf')
 
-## Check if the file exists
-if not os.path.exists(File_loc):
-    print(f"File not found: {File_loc}")
+## Check if the files exists
+if not os.path.exists(FWHM_file_loc):
+    print(f"FWHM file not found: {FWHM_file_loc}")
+    sys.exit(1)
+if not os.path.exists(Alignment_file_loc):
+    print(f"Alignment file not found: {Alignment_file_loc}")
     sys.exit(1)
 ###############################################################
+#%%
 
+#%%
+class Spectrometer_setup:
+    ## This class sets up the spectrometer parameters
 
-# %%
+    def __init__(self):
+        self.Diagnostic = Diagnostic
+        self.Experimental_shot = Experimental_shot
+        self.get_info()
+
+    def get_info(self):
+        ## This function sets the spectrometer parameters based on the diagnostic
+        ## Probe_wavelength (nm): Frequency of the probe laser
+        ## Wavelength_per_pixel (nm/pixel): Wavelength change per pixel provided by J. Katz
+        ## Probe_center (nm): Central wavelength of the spectrometer. This can be user defined, where 
+        ## value is found either in diagnostic setup in SRF or in table under Experimental Image in Shot Report. 
+        ## Otherwise, the example Experimental shot is used to find the central wavelength.
+        
+        self.Probe_wavelength = 526.5 # nm ## The 2w wavelength
+        if self.Experimental_shot != 0:
+            self.get_spectrometer_center()
+        if self.Diagnostic == 'IAW':
+            self.Wavelength_per_pixel = -0.00686 # nm/pixel
+            if self.Experimental_shot == 0:
+                self.Probe_center = 526.5 # nm
+        elif self.Diagnostic == 'EPW':
+            self.Wavelength_per_pixel = 0.4143 
+            if self.Experimental_shot == 0:
+                self.Probe_center = 527
+
+    def get_spectrometer_center(self):
+        ## This function retrieves the spectrometer center wavelength from the example experimental shot
+        Example_parent_loc = os.path.join(Global_loc, str(self.Experimental_shot), self.Diagnostic)
+        File_loc = os.path.join(Example_parent_loc, f'{self.Diagnostic.lower()}_s{self.Experimental_shot}.hdf')
+        print(File_loc)
+        if not os.path.exists(File_loc):
+            print('Experimental file not found: {}'.format(File_loc))
+            print('Reverting to user defined spectrometer center.')
+            self.Experimental_shot = 0
+        else:
+            hdf = SD(File_loc, SDC.READ)
+            data = hdf.select('Streak_array')
+            data_attributes = data.attributes()
+            self.Probe_center = data_attributes['CentralWavelength']
+
+class Calibration_analysis:
+    ## This class provides the calibration analysis for the IAW and EPW diagnostics
+
+    def __init__(self):
+        self.Spectrometer = Spectrometer_setup()
+        self.FWHM_file_loc = FWHM_file_loc
+        self.Alignment_file_loc = Alignment_file_loc
+        
+        self.FWHM_image = self.read_hdf(self.FWHM_file_loc)
+        self.Alignment_image = self.read_hdf(self.Alignment_file_loc)
+        
+        self.perform_calibration()
+
+    def read_hdf(self, File_loc, plot=False):
+        ## This function reads the HDF file and extracts the data
+        print(f"Reading HDF file: {File_loc}")
+        hdf = SD(File_loc, SDC.READ)
+        hdf_object = hdf.datasets()
+        
+        ## Get list of data groups stored in hdf file
+        obj_groups = [k for k in hdf_object.keys()]
+        print(f"\tData groups in HDF file: {obj_groups}")
+
+        ## Extracting real data from the hdf
+        data = hdf.select(obj_groups[0])
+        data_array = np.array(data.get(), dtype=np.float64)
+
+        ## Data image taken during shot
+        raw_image = data_array[0]
+        ## Background image taken prior to shot
+        pre_shot = data_array[1]
+        data_image = raw_image - pre_shot
+        data_image[data_image < 0] = 0
+        data_image = data_image - np.min(data_image)
+
+        if plot:
+            fig, axs = plt.subplots(figsize=(5, 4))
+            im = axs.imshow(data_image, cmap='inferno', origin='lower')
+            plt.colorbar(im, ax=axs)
+            axs.set_aspect('equal', adjustable='box')
+            axs.invert_yaxis()
+            axs.set_yticks([])
+            axs.set_xticks([])
+            plt.suptitle('s{} {} Data\n{}'.format(Shot_number, Diagnostic, File_loc.replace(Parent_loc, '')))
+        return data_image
+    
+    def perform_calibration(self, calibration_region=[400, 600], plot=True):
+        ## This function performs the calibration analysis on the data image
+        ## calibration_region: [start, end] pixel range for calibration
+        
+        Central_wavelength_fwhm, Gaus_params_fwhm, Signal_fit_fwhm, Signal_sum_fwhm = self.process_image(self.FWHM_image, calibration_region)
+        Central_wavelength_align, Gaus_params_align, Signal_fit_align, Signal_sum_align = self.process_image(self.Alignment_image, calibration_region)
+
+        Central_wavelength = Central_wavelength_align
+        popt_gaus = Gaus_params_fwhm
+
+        FWHM = 2 * np.sqrt(2 * np.log(2)) * popt_gaus[-1]
+        Input_FWHM = popt_gaus[-1]
+        
+        print('Central wavelength = {:.6g} nm'.format(Central_wavelength))
+        print('Instrument FWHM = {:.4g} nm'.format(FWHM))
+        ## The GG OTS code takes the Gaussian sigma as input for FWHM
+        print('GG OTS Code FWHM input = {:.4g} nm'.format(Input_FWHM))
+
+        if Save_bool:
+            with open(os.path.join(Parent_loc, f'{Diagnostic}_calibration_info.txt'), 'w') as f:
+                f.write(f'Central wavelength = {Central_wavelength:.6g} nm\n')
+                f.write(f'Instrument FWHM = {FWHM:.4g} nm\n')
+            f.close()
+
+        if plot == True:
+            if Diagnostic == 'IAW':
+                s = 0.5
+            elif Diagnostic == 'EPW':
+                s = 20
+
+            fig, axs = plt.subplots(2, 2, figsize=(8, 7))
+
+            def add_image(ax, image, central_wavelength, fit, sum, cmap='inferno', title='Image'): 
+                ax.imshow(image.T, cmap=cmap, origin='lower', extent=[fit[0][0], fit[0][-1], 0, image.shape[1]])
+                ax.axvline(central_wavelength, color='red', linestyle='--', label='Image centre', alpha=0.7)
+                ax.axvline(self.Spectrometer.Probe_center, color='cyan', linestyle='--', label='Probe centre', alpha=0.7)
+                ax.plot(fit[0], calibration_region[1]-50+sum[1]*20, ':', color='white', label='Signal')
+                ax.plot(fit[0], calibration_region[1]-50+fit[1]*20, color='limegreen')
+                leg = ax.legend()
+                ax.add_artist(leg)
+                ax.set_xlabel('Wavelength (nm)')
+                ax.set_ylabel('Pixels')              
+                ax.set_aspect('auto', adjustable='box')
+                ax.set_title(f'{title}')
+            
+            def add_fit(ax, central_wavelength, fit, sum, fwhm):
+                ax.plot(fit[0], sum[1], 'k.', label='Raw Signal')
+                ax.plot(fit[0], fit[1], 'g-', label='Gaussian Fit')
+                ax.axvline(central_wavelength, color='red', linestyle='--', alpha=0.7)
+                ax.axvline(self.Spectrometer.Probe_center, color='cyan', linestyle='--', alpha=0.7)
+                leg = ax.legend(title='Gaus FWHM={:.2g}nm'.format(fwhm), fontsize=10)
+                ax.add_artist(leg)
+                ax.set_xlabel('Wavelength (nm)')
+                ax.set_ylabel('Intensity')
+            
+            add_image(axs[0, 0], self.Alignment_image, Central_wavelength_align, Signal_fit_align, Signal_sum_align, title='Alignment Image')
+            add_image(axs[0, 1], self.FWHM_image, Central_wavelength_fwhm, Signal_fit_fwhm, Signal_sum_fwhm, title='FWHM Image')
+
+            add_fit(axs[1, 0], Central_wavelength_align, Signal_fit_align, Signal_sum_align, 2 * np.sqrt(2 * np.log(2)) * Gaus_params_align[-1])
+            add_fit(axs[1, 1], Central_wavelength_fwhm, Signal_fit_fwhm, Signal_sum_fwhm, 2 * np.sqrt(2 * np.log(2)) * Gaus_params_fwhm[-1])
+
+            for a in axs.flat:
+                a.minorticks_on()
+                a.tick_params(axis='both', which='major', length=10, direction='in', top=True, right=True)
+                a.tick_params(axis='both', which='minor', length=5, direction='in', top=True, right=True)
+                a.set_xlim(Central_wavelength-s, Central_wavelength+s)
+            for a in axs[0, :].flat:
+                a.tick_params(which='both', color='white')
+                a.set_ylim(calibration_region[0]+100, calibration_region[1]+25) 
+            plt.suptitle('{} Calibration Analysis'.format(Diagnostic), fontsize=16)
+            if Save_bool:
+                plt.savefig(os.path.join(Parent_loc, f'{Diagnostic}_calibration_analysis.png'), dpi=300, bbox_inches='tight')
+
+    def process_image(self, Image, calibration_region, plot=False):
+        ## This function processes the image to find the image's central wavelength and FWHM
+        
+        ## Masking the image to central calibration area
+        Image_mask = np.zeros_like(Image)
+        Image_mask[calibration_region[0]:calibration_region[1], calibration_region[0]:calibration_region[1]] = 1
+        Nan_image = Image * Image_mask
+
+        def strip_sum(image, axis=0, polyfit=1, plot=plot):
+            ## Summing the calibration signal along one axis 
+            ## and performing crude background removal
+            Sum = np.sum(image, axis=axis)
+            Sum /= np.max(Sum)
+            Fit_sum = Sum.copy()
+
+            Fit_sum[Fit_sum >= 0.05 * np.max(Fit_sum)] = np.mean(Fit_sum[calibration_region[0]-100:calibration_region[0]])
+            poly = np.poly1d(np.polyfit(np.arange(calibration_region[0], calibration_region[1], 1), Fit_sum[calibration_region[0]:calibration_region[1]], polyfit))
+            fit = poly(np.arange(calibration_region[0], calibration_region[1], 1))
+            if plot:
+                plt.figure()
+                plt.plot(Sum[calibration_region[0]:calibration_region[1]], 'k-', label='Summed signal')
+                plt.plot(fit, 'r--', label='Background fit')
+                plt.legend()
+                plt.suptitle('Checking background fit to signal along axis {}'.format(axis))
+            Sum[calibration_region[0]:calibration_region[1]] = Sum[calibration_region[0]:calibration_region[1]] - fit
+            return Sum/np.max(Sum)
+
+        Sum_X = strip_sum(Nan_image, axis=0, polyfit=1)
+        Sum_Y = strip_sum(Nan_image, axis=1, polyfit=1)
+        Sum_Y[Sum_Y < 0] = 0
+
+        Pixels = np.arange(0, np.shape(Image)[0], 1) # This assumes square image
+
+        Peak_X = np.argmax(Sum_Y)
+        Peak_Y = np.argmax(Sum_X)
+
+        ## Initial guess of central wavelength
+        Lambdas = Pixels * self.Spectrometer.Wavelength_per_pixel
+        Lambdas_peak = Lambdas[Peak_X]
+        Shift = self.Spectrometer.Probe_center - Lambdas_peak
+        Wavelength = Lambdas + Shift
+
+        ## Fitting a Gaussian to the instrument function
+        popt_gaus, pcov_gaus = curve_fit(self.gaussian, Wavelength, Sum_Y, p0=[1, self.Spectrometer.Probe_center, 0.1])
+        fit_gaussian = self.gaussian(Wavelength, *popt_gaus)
+        FWHM = 2 * np.sqrt(2 * np.log(2)) * popt_gaus[-1]
+        Input_FWHM = popt_gaus[-1]
+        Fit = fit_gaussian
+
+        Lambdas_peak = Lambdas[np.argmax(fit_gaussian)]
+        Shift = self.Spectrometer.Probe_center - Lambdas_peak
+        Wavelength = Lambdas + Shift
+        Central_wavelength = Shift + self.Spectrometer.Wavelength_per_pixel*np.shape(Image)[1] / 2
+
+        if Diagnostic == 'IAW':
+            ## There is a double peak feature in this IAW calibration data..
+            Indexes = peakutils.peak.indexes(Sum_Y, min_dist=5, thres=0.85)[:]
+            Peak = int(((Indexes[0]+Indexes[1])/2))
+            popt_gaus, pcov_gaus = curve_fit(self.gaussian, Wavelength[Peak:], Sum_Y[Peak:], p0=[1, self.Spectrometer.Probe_center, 0.1])
+            fit_gaussian = self.gaussian(Wavelength, *popt_gaus)
+            FWHM = 2 * np.sqrt(2 * np.log(2)) * popt_gaus[-1]
+            Input_FWHM = popt_gaus[-1]
+            Fit = fit_gaussian
+
+        return Central_wavelength, popt_gaus, [Wavelength, Fit], [Sum_X, Sum_Y]
+    
+    def fwhm2sigma(self, fwhm):
+        ## Convert FWHM to sigma for Gaussian fit
+        return fwhm / np.sqrt(8 * np.log(2))
+
+    def lorentz(self, x, amp, gamma):
+        ## Output a Lorentzian fit
+        g = gamma/2
+        array = (amp*g) / (cst.pi*(x**2 + g**2))
+        return array
+
+    def gaussian(self, x, amp, mu, std):
+        ## Output a Gaussian fit
+        top = (x - mu)**2
+        array = amp*np.exp(-(top)/(2*std**2))
+        return array
+#%%
+#%%
+if __name__ == "__main__":
+    ## Run the calibration analysis
+    calibration_analysis = Calibration_analysis()
+    print("Calibration analysis completed.")
+    plt.show()
+    
