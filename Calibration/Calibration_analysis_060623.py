@@ -13,7 +13,6 @@ import sys
 import scipy.constants as cst
 from pyhdf.SD import SD, SDC
 from scipy.optimize import curve_fit
-#%%
 
 #%%
 ## Import data
@@ -26,7 +25,7 @@ from scipy.optimize import curve_fit
 ## Define the shot day, shot number, and diagnostic
 Shot_day = 'OMEGA_Jun2023'
 Shot_number = 0
-Diagnostic = 'IAW'
+Diagnostic = 'EPW'
 
 ## If using TDYNO_NLUF Box account, User as required in Parent_loc
 User = 'hpoole'
@@ -69,7 +68,6 @@ if not os.path.exists(Alignment_file_loc):
     print(f"Alignment file not found: {Alignment_file_loc}")
     sys.exit(1)
 ###############################################################
-#%%
 
 #%%
 class Spectrometer_setup:
@@ -315,11 +313,10 @@ class Calibration_analysis:
         top = (x - mu)**2
         array = amp*np.exp(-(top)/(2*std**2))
         return array
-#%%
+
 #%%
 if __name__ == "__main__":
     ## Run the calibration analysis
     calibration_analysis = Calibration_analysis()
     print("Calibration analysis completed.")
     plt.show()
-    
