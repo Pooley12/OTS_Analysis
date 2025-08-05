@@ -286,21 +286,52 @@ class Calibration_analysis:
             Fit = fit_gaussian
 
         return Central_wavelength, popt_gaus, [Wavelength, Fit], [Sum_X, Sum_Y]
-    
-    def fwhm2sigma(self, fwhm):
-        ## Convert FWHM to sigma for Gaussian fit
-        return fwhm / np.sqrt(8 * np.log(2))
 
-    def lorentz(self, x, amp, gamma):
-        ## Output a Lorentzian fit
-        g = gamma/2
-        array = (amp*g) / (cst.pi*(x**2 + g**2))
+    @staticmethod
+    def lorentz(x, amp, gamma):
+        """
+        Computes a Lorentzian function for the given input array.
+
+        Parameters
+        ----------
+        x : array-like
+            The input values at which to evaluate the Lorentzian function.
+        amp : float
+            The amplitude (height) of the Lorentzian peak.
+        gamma : float
+            The full width at half maximum (FWHM) of the peak.
+
+        Returns
+        -------
+        array : ndarray
+            The computed Lorentzian values for each element in `x`.
+        """
+        g = gamma / 2
+        array = (amp * g) / (cst.pi * (x**2 + g**2))
         return array
 
-    def gaussian(self, x, amp, mu, std):
-        ## Output a Gaussian fit
-        top = (x - mu)**2
-        array = amp*np.exp(-(top)/(2*std**2))
+    @staticmethod
+    def gaussian(x, amp, mu, std):
+        """
+        Computes a Gaussian function for the given input array.
+
+        Parameters
+        ----------
+        x : array-like
+            The input values at which to evaluate the Gaussian function.
+        amp : float
+            The amplitude (height) of the Gaussian peak.
+        mu : float
+            The mean (center) of the Gaussian distribution.
+        std : float
+            The standard deviation (width) of the Gaussian distribution.
+
+        Returns
+        -------
+        array : ndarray
+            The computed Gaussian values for each element in `x`.
+        """
+        array = amp * np.exp(-((x - mu) ** 2) / (2 * std ** 2))
         return array
 
 #%%
@@ -320,3 +351,4 @@ if __name__ == "__main__":
         f.close()
 
     plt.show()
+# %%
