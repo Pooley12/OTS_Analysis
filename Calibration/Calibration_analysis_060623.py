@@ -127,6 +127,8 @@ class Calibration_analysis:
         Type of diagnostic ('IAW' or 'EPW').
     Global_loc : str
         Path to the global data directory.
+    Parent_loc : str
+        Path to the parent directory containing the calibration shot data.
     FWHM_file_loc : str
         Path to the HDF file containing FWHM calibration image.
     Alignment_file_loc : str
@@ -151,9 +153,10 @@ class Calibration_analysis:
     """
     ## This class provides the calibration analysis for the IAW and EPW diagnostics
 
-    def __init__(self, Diagnostic, Global_loc, FWHM_file_loc, Alignment_file_loc, Experimental_shot, Save_bool):
+    def __init__(self, Diagnostic, Global_loc, Parent_loc, FWHM_file_loc, Alignment_file_loc, Experimental_shot, Save_bool):
         self.Diagnostic = Diagnostic
         self.Global_loc = Global_loc
+        self.Parent_loc = Parent_loc
         self.Experimental_shot = Experimental_shot
         self.FWHM_file_loc = FWHM_file_loc
         self.Alignment_file_loc = Alignment_file_loc
@@ -193,7 +196,7 @@ class Calibration_analysis:
         print(f"\tData groups in HDF file: {obj_groups}")
 
         ## Extracting real data from the hdf
-        data = hdf.select(obj_groups[0])
+        data = hdf.select('Streak_array')
         data_array = np.array(data.get(), dtype=np.float64)
 
         ## Data image taken during shot
@@ -212,7 +215,7 @@ class Calibration_analysis:
             axs.invert_yaxis()
             axs.set_yticks([])
             axs.set_xticks([])
-            plt.suptitle('s{} {} Data\n{}'.format(Shot_number, Diagnostic, File_loc.replace(Parent_loc, '')))
+            plt.suptitle('Calibration {} Data\n{}'.format(self.Diagnostic, File_loc.replace(f"{self.Parent_loc}/", '')))
         return data_image
     
     def perform_calibration(self, calibration_region=[400, 600], plot=True):
@@ -288,9 +291,9 @@ class Calibration_analysis:
             for a in axs[0, :].flat:
                 a.tick_params(which='both', color='white')
                 a.set_ylim(calibration_region[0]+100, calibration_region[1]+25) 
-            plt.suptitle('{} Calibration Analysis'.format(Diagnostic), fontsize=16)
+            plt.suptitle('{} Calibration Analysis'.format(self.Diagnostic), fontsize=16)
             if self.Save_bool:
-                plt.savefig(os.path.join(Parent_loc, f'{Diagnostic}_calibration_analysis.png'), dpi=300, bbox_inches='tight')
+                plt.savefig(os.path.join(self.Parent_loc, f'{self.Diagnostic}_calibration_analysis.png'), dpi=300, bbox_inches='tight')
 
     def process_image(self, Image, calibration_region, plot=False):
         """
@@ -426,6 +429,7 @@ class Calibration_analysis:
         array = amp * np.exp(-((x - mu) ** 2) / (2 * std ** 2))
         return array
 
+
 #%%
 if __name__ == "__main__":
     #%%
@@ -485,7 +489,7 @@ if __name__ == "__main__":
     
     #%%
     ## Run the calibration analysis
-    Calibration = Calibration_analysis(Diagnostic, Global_loc, FWHM_file_loc, Alignment_file_loc, Experimental_shot, Save_bool)
+    Calibration = Calibration_analysis(Diagnostic, Global_loc, Parent_loc, FWHM_file_loc, Alignment_file_loc, Experimental_shot, Save_bool)
 
     print('Central wavelength = {:.6g} nm'.format(Calibration.Central_wavelength))
     print('Instrument FWHM = {:.4g} nm'.format(Calibration.FWHM))
@@ -499,4 +503,3 @@ if __name__ == "__main__":
         f.close()
 
     plt.show()
-# %%
