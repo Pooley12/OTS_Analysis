@@ -15,92 +15,91 @@ from pyhdf.SD import SD, SDC
 from scipy.optimize import curve_fit
 
 #%%
-## Import data
-###############################################################
-##                                                           ##
-##                        DATA TO INPUT                      ##
-##                                                           ##
-###############################################################
-
-## Define the shot day, shot number, and diagnostic
-Shot_day = 'OMEGA_Jun2023'
-Shot_number = 0
-Diagnostic = 'EPW'
-
-## If using TDYNO_NLUF Box account, User as required in Parent_loc
-User = 'hpoole'
-
-## Example shot number, used for finding the spectrometer central wavelength
-## This feature can be switched off by setting Experimental_shot = 0
-## NB: It is not critical for this script to have the correct spectrometer center wavelength,
-## as this will evaluated during the data extraction.
-Experimental_shot = 108617
-
-## If you want to save output figures and info
-Save_bool = True
-
-###############################################################
-
-###############################################################
-##                                                           ##
-##                      FILE LOCATIONS                       ##
-##                                                           ##
-###############################################################
-Global_loc = os.path.join('/', 'Users', User, 'Library', 'CloudStorage', 'Box-Box', 'TDYNO_NLUF', 'OMEGA', Shot_day, 'Data')
-Parent_loc = os.path.join(Global_loc, str(Shot_number), Diagnostic)
-
-## Define the calibration files
-## FWHM_file_loc: This file provides the FWHM calibration data
-## Alignment_file_loc: This file provides the alignment calibration data
-## NB: Ideally, these files are the same, but often not..
-if Diagnostic == 'IAW':
-    FWHM_file_loc = os.path.join(Parent_loc, 'IAW_532_1o_532cw_500um_121p71_270.hdf')
-    Alignment_file_loc = FWHM_file_loc
-elif Diagnostic == 'EPW':
-    FWHM_file_loc = os.path.join(Parent_loc, 'EPW_FWHM_100um_263p5cw_ross_150ph.hdf')
-    Alignment_file_loc = os.path.join(Parent_loc, 'EPW_align_532_1o_527cw_500um_121p71_270.hdf')
-
-## Check if the files exists
-if not os.path.exists(FWHM_file_loc):
-    print(f"FWHM file not found: {FWHM_file_loc}")
-    sys.exit(1)
-if not os.path.exists(Alignment_file_loc):
-    print(f"Alignment file not found: {Alignment_file_loc}")
-    sys.exit(1)
-###############################################################
-
-#%%
 class Spectrometer_setup:
-    ## This class sets up the spectrometer parameters
+    """
+    Sets up and manages spectrometer parameters for Thomson scattering diagnostics.
 
-    def __init__(self):
+    This class initializes spectrometer settings based on the diagnostic type ('IAW' or 'EPW'),
+    global file location, and experimental shot number. It configures probe wavelength, wavelength
+    per pixel, and probe center, either from default values or by reading from experimental shot files.
+
+    Parameters
+    ----------
+    Diagnostic : str
+        Type of diagnostic ('IAW' or 'EPW').
+    Global_loc : str
+        Path to the global data directory.
+    Experimental_shot : int
+        Experimental shot number.
+
+    Attributes
+    ----------
+    Probe_wavelength : float
+        Wavelength of the probe laser (nm).
+    Wavelength_per_pixel : float
+        Wavelength change per pixel (nm/pixel).
+    Probe_center : float
+        Central wavelength of the spectrometer (nm).
+
+    Notes
+    -----
+    - If an experimental shot is provided, the spectrometer center is obtained from the HDF file.
+    - Otherwise, default values are assigned based on the diagnostic type.
+    """
+
+    def __init__(self, Diagnostic, Global_loc, Experimental_shot):
         self.Diagnostic = Diagnostic
+        self.Global_loc = Global_loc
         self.Experimental_shot = Experimental_shot
         self.get_info()
 
     def get_info(self):
-        ## This function sets the spectrometer parameters based on the diagnostic
-        ## Probe_wavelength (nm): Frequency of the probe laser
-        ## Wavelength_per_pixel (nm/pixel): Wavelength change per pixel provided by J. Katz
-        ## Probe_center (nm): Central wavelength of the spectrometer. This can be user defined, where 
-        ## value is found either in diagnostic setup in SRF or in table under Experimental Image in Shot Report. 
-        ## Otherwise, the example Experimental shot is used to find the central wavelength.
-        
-        self.Probe_wavelength = 526.5 # nm ## The 2w wavelength
+        """
+        Sets spectrometer parameters based on the diagnostic type and experimental shot.
+        This method configures the probe wavelength, wavelength per pixel, and probe center
+        for the spectrometer. The values are determined by the diagnostic type ('IAW' or 'EPW')
+        and whether an experimental shot is specified.
+
+        Attributes set
+        --------------
+        Probe_wavelength : float
+            Wavelength of the probe laser (nm).
+        Wavelength_per_pixel : float
+            Wavelength change per pixel (nm/pixel). Provided by J. Katz.
+        Probe_center : float
+            Central wavelength of the spectrometer (nm).
+
+        Notes
+        -----
+        - If an experimental shot is provided, the spectrometer center is obtained using `get_spectrometer_center()`.
+        - Otherwise, default values are assigned, which can be found in the diagnostic setup in the SRF/RID or in the Experimental Image table in the Shot Report.
+        """
+        self.Probe_wavelength = 526.5 ## The 2w wavelength
         if self.Experimental_shot != 0:
             self.get_spectrometer_center()
         if self.Diagnostic == 'IAW':
-            self.Wavelength_per_pixel = -0.00686 # nm/pixel
+            self.Wavelength_per_pixel = -0.00686
             if self.Experimental_shot == 0:
-                self.Probe_center = 526.5 # nm
+                self.Probe_center = 526.5
         elif self.Diagnostic == 'EPW':
             self.Wavelength_per_pixel = 0.4143 
             if self.Experimental_shot == 0:
                 self.Probe_center = 527
 
     def get_spectrometer_center(self):
-        ## This function retrieves the spectrometer center wavelength from the example experimental shot
-        Example_parent_loc = os.path.join(Global_loc, str(self.Experimental_shot), self.Diagnostic)
+        """
+        Retrieves the spectrometer center wavelength from an experimental shot HDF file.
+
+        This method constructs the file path for the experimental shot's HDF file and attempts to read the
+        'CentralWavelength' attribute from the 'Streak_array' dataset. If the file does not exist, it reverts
+        to a user-defined spectrometer center by setting the experimental shot to 0.
+
+        Side Effects
+        ------------
+        - Updates self.Probe_center with the retrieved central wavelength from the HDF file.
+        - If the file does not exist, sets self.Experimental_shot to 0 and reverts to user-defined spectrometer center.
+        """
+        Example_parent_loc = os.path.join(self.Global_loc, str(self.Experimental_shot), self.Diagnostic)
         File_loc = os.path.join(Example_parent_loc, f'{self.Diagnostic.lower()}_s{self.Experimental_shot}.hdf')
         print(File_loc)
         if not os.path.exists(File_loc):
@@ -114,12 +113,53 @@ class Spectrometer_setup:
             self.Probe_center = data_attributes['CentralWavelength']
 
 class Calibration_analysis:
+    """
+    Performs calibration analysis for IAW and EPW diagnostics.
+
+    This class processes calibration images to extract key spectrometer parameters,
+    including the central wavelength and full width at half maximum (FWHM), using 
+    Gaussian fitting and background subtraction. It supports visualization and saving 
+    of calibration results.
+
+    Parameters
+    ----------
+    Diagnostic : str
+        Type of diagnostic ('IAW' or 'EPW').
+    Global_loc : str
+        Path to the global data directory.
+    FWHM_file_loc : str
+        Path to the HDF file containing FWHM calibration image.
+    Alignment_file_loc : str
+        Path to the HDF file containing alignment calibration image.
+    Experimental_shot : int
+        Experimental shot number.
+    Save_bool : bool
+        If True, saves generated calibration plots.
+
+    Attributes
+    ----------
+    Spectrometer : Spectrometer_setup
+        Instance containing spectrometer configuration and parameters.
+    FWHM_image : numpy.ndarray
+        Processed FWHM calibration image.
+    Alignment_image : numpy.ndarray
+        Processed alignment calibration image.
+    Central_wavelength : float
+        Extracted central wavelength from calibration analysis.
+    FWHM : float
+        Extracted full width at half maximum from calibration analysis.
+    """
     ## This class provides the calibration analysis for the IAW and EPW diagnostics
 
-    def __init__(self):
-        self.Spectrometer = Spectrometer_setup()
+    def __init__(self, Diagnostic, Global_loc, FWHM_file_loc, Alignment_file_loc, Experimental_shot, Save_bool):
+        self.Diagnostic = Diagnostic
+        self.Global_loc = Global_loc
+        self.Experimental_shot = Experimental_shot
         self.FWHM_file_loc = FWHM_file_loc
         self.Alignment_file_loc = Alignment_file_loc
+        self.Save_bool = Save_bool
+
+        self.Spectrometer = Spectrometer_setup(self.Diagnostic, self.Global_loc, self.Experimental_shot)
         
         self.FWHM_image = self.read_hdf(self.FWHM_file_loc)
         self.Alignment_image = self.read_hdf(self.Alignment_file_loc)
@@ -127,7 +167,23 @@ class Calibration_analysis:
         self.perform_calibration()
 
     def read_hdf(self, File_loc, plot=False):
-        ## This function reads the HDF file and extracts the data
+        """
+        This function opens the specified HDF file, extracts the first data group, and retrieves the raw and pre-shot images.
+        It subtracts the background (pre-shot) image from the raw image, sets negative values to zero, and normalizes the result.
+        If `plot` is True, the processed image is displayed using matplotlib.
+
+        Parameters
+        ----------
+        File_loc : str
+            Path to the HDF file to be read.
+        plot : bool, optional
+            If True, displays a plot of the processed data image (default is False).
+
+        Returns
+        -------
+        data_image : numpy.ndarray
+            The processed image data with background subtracted and negative values set to zero.
+        """
         print(f"Reading HDF file: {File_loc}")
         hdf = SD(File_loc, SDC.READ)
         hdf_object = hdf.datasets()
@@ -160,9 +216,24 @@ class Calibration_analysis:
         return data_image
     
     def perform_calibration(self, calibration_region=[400, 600], plot=True):
-        ## This function performs the calibration analysis on the data image
-        ## calibration_region: [start, end] pixel range for calibration
+        """
+        Performs calibration analysis on the provided data images within a specified pixel region.
+        This method processes both the FWHM and alignment images to extract calibration parameters,
+        including the central wavelength and FWHM. Optionally, it generates diagnostic plots
+        visualizing the calibration results.
         
+        Parameters
+        ----------
+        calibration_region : list of int, optional
+            The [start, end] pixel range for calibration analysis. Default is [400, 600].
+        plot : bool, optional
+            If True, generates diagnostic plots of the calibration analysis. Default is True.
+        
+        Notes
+        -----
+        - Updates instance attributes: Central_wavelength and FWHM.
+        - If `plot` is True, displays and optionally saves calibration analysis figures.
+        """   
         Central_wavelength_fwhm, Gaus_params_fwhm, Signal_fit_fwhm, Signal_sum_fwhm = self.process_image(self.FWHM_image, calibration_region)
         Central_wavelength_align, Gaus_params_align, Signal_fit_align, Signal_sum_align = self.process_image(self.Alignment_image, calibration_region)
 
@@ -218,12 +289,33 @@ class Calibration_analysis:
                 a.tick_params(which='both', color='white')
                 a.set_ylim(calibration_region[0]+100, calibration_region[1]+25) 
             plt.suptitle('{} Calibration Analysis'.format(Diagnostic), fontsize=16)
-            if Save_bool:
+            if self.Save_bool:
                 plt.savefig(os.path.join(Parent_loc, f'{Diagnostic}_calibration_analysis.png'), dpi=300, bbox_inches='tight')
 
     def process_image(self, Image, calibration_region, plot=False):
-        ## This function processes the image to find the image's central wavelength and FWHM
-        
+        """
+        Processes a calibration image to determine its central wavelength and full width at half maximum (FWHM).
+
+        Parameters
+        ----------
+        Image : numpy.ndarray
+            2D array representing the calibration image.
+        calibration_region : tuple or list
+            Indices specifying the region of interest for calibration (start, end).
+        plot : bool, optional
+            If True, plots intermediate results for diagnostic purposes (default is False).
+
+        Returns
+        -------
+        Central_wavelength : float
+            Estimated central wavelength of the calibration image.
+        popt_gaus : list
+            Optimal parameters for the fitted Gaussian [amplitude, center, width].
+        [Wavelength, Fit] : list
+            Arrays of wavelength values and corresponding fitted Gaussian values.
+        [Sum_X, Sum_Y] : list
+            Summed signal arrays along X and Y axes, respectively.
+        """
         ## Masking the image to central calibration area
         Image_mask = np.zeros_like(Image)
         Image_mask[calibration_region[0]:calibration_region[1], calibration_region[0]:calibration_region[1]] = 1
@@ -336,8 +428,64 @@ class Calibration_analysis:
 
 #%%
 if __name__ == "__main__":
+    #%%
+    ## Import data
+    ###############################################################
+    ##                                                           ##
+    ##                        DATA TO INPUT                      ##
+    ##                                                           ##
+    ###############################################################
+
+    ## Define the shot day, shot number, and diagnostic
+    Shot_day = 'OMEGA_Jun2023'
+    Shot_number = 0
+    Diagnostic = 'EPW'
+
+    ## If using TDYNO_NLUF Box account, User as required in Parent_loc
+    User = 'hpoole'
+
+    ## Example shot number, used for finding the spectrometer central wavelength
+    ## This feature can be switched off by setting Experimental_shot = 0
+    ## NB: It is not critical for this script to have the correct spectrometer center wavelength,
+    ## as this will evaluated during the data extraction.
+    Experimental_shot = 108617
+
+    ## If you want to save output figures and info
+    Save_bool = True
+
+    ###############################################################
+
+    ###############################################################
+    ##                                                           ##
+    ##                      FILE LOCATIONS                       ##
+    ##                                                           ##
+    ###############################################################
+    Global_loc = os.path.join('/', 'Users', User, 'Library', 'CloudStorage', 'Box-Box', 'TDYNO_NLUF', 'OMEGA', Shot_day, 'Data')
+    Parent_loc = os.path.join(Global_loc, str(Shot_number), Diagnostic)
+
+    ## Define the calibration files
+    ## FWHM_file_loc: This file provides the FWHM calibration data
+    ## Alignment_file_loc: This file provides the alignment calibration data
+    ## NB: Ideally, these files are the same, but often not..
+    if Diagnostic == 'IAW':
+        FWHM_file_loc = os.path.join(Parent_loc, 'IAW_532_1o_532cw_500um_121p71_270.hdf')
+        Alignment_file_loc = FWHM_file_loc
+    elif Diagnostic == 'EPW':
+        FWHM_file_loc = os.path.join(Parent_loc, 'EPW_FWHM_100um_263p5cw_ross_150ph.hdf')
+        Alignment_file_loc = os.path.join(Parent_loc, 'EPW_align_532_1o_527cw_500um_121p71_270.hdf')
+
+    ## Check if the files exists
+    if not os.path.exists(FWHM_file_loc):
+        print(f"FWHM file not found: {FWHM_file_loc}")
+        sys.exit(1)
+    if not os.path.exists(Alignment_file_loc):
+        print(f"Alignment file not found: {Alignment_file_loc}")
+        sys.exit(1)
+    ###############################################################
+    
+    #%%
     ## Run the calibration analysis
-    Calibration = Calibration_analysis()
+    Calibration = Calibration_analysis(Diagnostic, Global_loc, FWHM_file_loc, Alignment_file_loc, Experimental_shot, Save_bool)
 
     print('Central wavelength = {:.6g} nm'.format(Calibration.Central_wavelength))
     print('Instrument FWHM = {:.4g} nm'.format(Calibration.FWHM))
