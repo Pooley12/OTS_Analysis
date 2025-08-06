@@ -643,7 +643,6 @@ class Data_extraction:
         """
         ## Get temporal resolution
         Temporal_resolution_pixels = int(self.Shot_info.Temporal_resolution/self.Data_info.Time_per_pixel)
-        print(Temporal_resolution_pixels)
         
         ## Vectorized binning and averaging
         Scattering_times = []
@@ -722,6 +721,7 @@ if __name__ == "__main__":
     ###############################################################
 
     #%%
+    ## Run the data extraction analysis
     ###############################################################
     ##                                                           ##
     ##                    PERFORM ANALYSIS                       ##
