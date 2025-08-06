@@ -146,6 +146,8 @@ class Calibration_analysis:
         Processed FWHM calibration image.
     Alignment_image : numpy.ndarray
         Processed alignment calibration image.
+    Probe_pix_loc : int
+        Pixel location of the probe center in the calibration images.
     Central_wavelength : float
         Extracted central wavelength from calibration analysis.
     FWHM : float
@@ -237,9 +239,10 @@ class Calibration_analysis:
         - Updates instance attributes: Central_wavelength and FWHM.
         - If `plot` is True, displays and optionally saves calibration analysis figures.
         """   
-        Central_wavelength_fwhm, Gaus_params_fwhm, Signal_fit_fwhm, Signal_sum_fwhm = self.process_image(self.FWHM_image, calibration_region)
-        Central_wavelength_align, Gaus_params_align, Signal_fit_align, Signal_sum_align = self.process_image(self.Alignment_image, calibration_region)
+        Probe_pix_loc_fwhm, Central_wavelength_fwhm, Gaus_params_fwhm, Signal_fit_fwhm, Signal_sum_fwhm = self.process_image(self.FWHM_image, calibration_region)
+        Probe_pix_loc_align, Central_wavelength_align, Gaus_params_align, Signal_fit_align, Signal_sum_align = self.process_image(self.Alignment_image, calibration_region)
 
+        self.Probe_pix_loc = Probe_pix_loc_align
         self.Central_wavelength = Central_wavelength_align
         popt_gaus = Gaus_params_fwhm
 
@@ -310,8 +313,10 @@ class Calibration_analysis:
 
         Returns
         -------
+        Probe_pix_loc : int
+            Pixel location of the probe center.
         Central_wavelength : float
-            Estimated central wavelength of the calibration image.
+            Central wavelength of the calibration image.
         popt_gaus : list
             Optimal parameters for the fitted Gaussian [amplitude, center, width].
         [Wavelength, Fit] : list
@@ -369,6 +374,7 @@ class Calibration_analysis:
         Shift = self.Spectrometer.Probe_center - Lambdas_peak
         Wavelength = Lambdas + Shift
         Central_wavelength = Shift + self.Spectrometer.Wavelength_per_pixel*np.shape(Image)[1] / 2
+        Probe_pix_loc = np.argmax(fit_gaussian)
 
         if Diagnostic == 'IAW':
             ## There is a double peak feature in this IAW calibration data..
@@ -380,7 +386,7 @@ class Calibration_analysis:
             Input_FWHM = popt_gaus[-1]
             Fit = fit_gaussian
 
-        return Central_wavelength, popt_gaus, [Wavelength, Fit], [Sum_X, Sum_Y]
+        return Probe_pix_loc, Central_wavelength, popt_gaus, [Wavelength, Fit], [Sum_X, Sum_Y]
 
     @staticmethod
     def lorentz(x, amp, gamma):
@@ -429,7 +435,6 @@ class Calibration_analysis:
         array = amp * np.exp(-((x - mu) ** 2) / (2 * std ** 2))
         return array
 
-
 #%%
 if __name__ == "__main__":
     #%%
@@ -443,7 +448,7 @@ if __name__ == "__main__":
     ## Define the shot day, shot number, and diagnostic
     Shot_day = 'OMEGA_Jun2023'
     Shot_number = 0
-    Diagnostic = 'EPW'
+    Diagnostic = 'IAW'
 
     ## If using TDYNO_NLUF Box account, User as required in Parent_loc
     User = 'hpoole'
@@ -491,6 +496,7 @@ if __name__ == "__main__":
     ## Run the calibration analysis
     Calibration = Calibration_analysis(Diagnostic, Global_loc, Parent_loc, FWHM_file_loc, Alignment_file_loc, Experimental_shot, Save_bool)
 
+    print('Probe pixel location = {}'.format(Calibration.Probe_pix_loc))
     print('Central wavelength = {:.6g} nm'.format(Calibration.Central_wavelength))
     print('Instrument FWHM = {:.4g} nm'.format(Calibration.FWHM))
     ## The GG OTS code takes the Gaussian sigma as input for FWHM
@@ -498,6 +504,7 @@ if __name__ == "__main__":
     
     if Save_bool:
         with open(os.path.join(Parent_loc, f'{Diagnostic}_calibration_info.txt'), 'w') as f:
+            f.write(f'Probe pixel location = {Calibration.Probe_pix_loc}\n')
             f.write(f'Central wavelength = {Calibration.Central_wavelength:.6g} nm\n')
             f.write(f'Instrument FWHM = {Calibration.FWHM:.4g} nm\n')
         f.close()
