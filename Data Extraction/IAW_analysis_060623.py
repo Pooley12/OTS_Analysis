@@ -398,7 +398,7 @@ class Data_calibration:
 
         self.Wavelength_axis = self.get_wavelength_axis()
 
-        # self.illustrate_scattering_region()
+        self.illustrate_scattering_region()
 
     def read_hdf(self, File_loc, plot=False):
         """
