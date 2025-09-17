@@ -6,7 +6,7 @@ import os
 import matplotlib.pyplot as plt
 ## Add the Libraries folder to the system path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Libraries'))
-from normalization import Data_normalisation
+from normalisation import Data_normalisation
 from OTSpower import OTSpwr
 from OTSpower import kangsm_with_file
 
@@ -14,7 +14,7 @@ from OTSpower import kangsm_with_file
 class Setup_OTS:
 
     def __init__(self):
-        from setup import Exploration
+        from setup import Exploration  # Delayed import to avoid circular import
         self.EXPLORE = Exploration()
         self.laser_inputs()
         self.fixed_inputs()
@@ -205,7 +205,7 @@ class Run_OTS:
 class Fit_OTS:
 
     def likelihood(self, sigma, Fit, Data, Data_err):
-        # Calculate the difference between model and experimental data, normalized by the experimental error
+        # Calculate the difference between model and experimental data, normalised by the experimental error
         dif = (Data - Fit) / Data_err
         per = (Data - Fit) / (Data*Data_err)
 
@@ -245,3 +245,6 @@ class Fit_OTS:
 
         # Fit_y /= np.nanmax(Fit_y)
         return Fit_y
+    
+# norms=[0.2819047619047619, 0.1619047619047619, 0.8304820237218405, 0.46499999999999997, 0.8124999999999999, 0.3666666666666667]
+# Run_OTS().run_fitting(*norms, core=[1], unnormalise=True)
