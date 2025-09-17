@@ -1,0 +1,38 @@
+--OTS---input_file------------------------------------
+--
+--fit_parameters------------------------------flag----
+DO_FIT			0
+LAMBDA_LASER	526.5000000000001
+SCATTERING_ANGLE	59.9
+ELECTRON_TEMP		330		0
+ION_TEMP		100		0
+ELECTRON_DENSITY	2e+26		0
+AMPLITUDE		1.0		0
+BASELINE		0.0		0
+Z_FREE                 6              0
+E_CURRENT		-0.35              0
+FLOW			-0.17
+USE_EOS			0
+--target_spec--------------------------chem----Zfree--
+NUMBER_OF_SPECIES 3
+TARGET_1 C 0.499 -1
+TARGET_2 H 0.428 1
+TARGET_3 Cl 0.063 17
+--integration_and_fit---------------------------------
+N_DAWSON               2048
+N_FFT                  2048
+EPS			1.0E-3
+INST_FWHM		0.001
+AMOEBA_MAX_ITER		1
+LEVENBERG_MARQUARDT	1
+LM_MAX_ITER		1
+SIGMA_LM		1.0
+--See(k,w)------------------------------------norm----
+SALPETER		1		0
+TOTAL			0		0
+LAMBDA_MIN		524.5000000000001
+LAMBDA_MAX		528.5000000000001
+LAMBDA_STEP            0.001
+--file_spec-------------------------------------------
+DATA_FILE		TS_kr_0.txt
+SAVE_FILE		IAW.txt
