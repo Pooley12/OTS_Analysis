@@ -7,7 +7,7 @@ from multiprocessing import Process, Pool, Queue
 from run_IAW import Run_OTS, Fit_OTS
 ## Add the Libraries folder to the system path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Libraries'))
-from normalization import Data_normalisation
+from normalisation import Data_normalisation
 from mcmc_iaw import LogLike_nograd
 import matplotlib.pyplot as plt
 import arviz as az
@@ -28,26 +28,22 @@ class Exploration:
         ## logbool -> Bool function whether to explore the parameter in log space
         self.params = ['ELECTRON_TEMP', 'ION_TEMP', 'ELECTRON_DENSITY', 'E_CURRENT', 'FLOW', 'V_GRAD']
         self.units = ['eV', 'eV', '1/cc', 'nm', 'nm', 'nm']
-        # self.inits = [276, 30, 1e+20, 0.05, -0.00255, 10e-2]
-        # self.inits = [200, 30, 1e+20, -0.1, 0.32, 10e-2]
-        # self.mins = [1, 1, 5e19, -1, -0.3, 0]
-        # self.maxs = [500, 500, 8e20, 1, 0.5, 0.3]
 
-        self.inits = [400, 700, 1e+20, -0.1, 0, 10e-2]
-        self.mins = [1, 100, 5e19, -1, -0.3, 0]
-        self.maxs = [550, 1500, 8e20, 1, 0.5, 0.3]
+        self.inits = [173, 110, 5e+20, -0.07, 0.35, 0.11]
+        self.mins = [25, 25, 5e19, -1, -0.3, 0]
+        self.maxs = [550, 550, 8e20, 1, 0.5, 0.3]
         self.logbool = [False, False, True, False, False, False]
 
         ## Normalise the parameters, as MCMC explores parameters between 0 and 1
         self.norm_inits = [Data_normalisation().normalise_data(self.inits[i], self.mins[i], self.maxs[i], log=self.logbool[i]) for i in range(len(self.inits))]
 
         ## Define any fixed parameters required for fitting
-        self.z = 6 # Ionisation
+        self.z = 6 # Ionisation of carbon
 
         ## Sigma utilised in cost function of MCMC fitting
         self.sigma = 2.5
 
-        ## Define laser parameters of the scattering system
+        ## Define laser parameters of the scattering system (wavelength_fwhm comes from calibration fit)
         self.wavelength = 526.5 * 1e-9  # m
         self.wavelength_fwhm = 0.06672 * 1e-9 # m
         self.scattering_angle = 59.9  # deg
@@ -94,7 +90,6 @@ class Fitting:
 
     def experimental_data(self):
         ## Defining the raw data
-
         Raw_data = np.genfromtxt(self.raw_file)
         self.raw_lambda, self.raw_I, Raw_per_err = Raw_data[:, 0], Raw_data[:, 1], Raw_data[:, 2]
         self.raw_err = self.raw_I * Raw_per_err
@@ -105,6 +100,7 @@ class Fitting:
         ## NB: Doesn't perform any fitting
 
         Fit_x, Fit_y = Run_OTS().run_fitting(*self.EXPLORE.inits, unnormalise=False)
+
         Fit_y = np.interp(self.raw_lambda, Fit_x * 1e9, Fit_y)
         scaled_f = Fit_OTS().scalings(self.EXPLORE.sigma, self.raw_I, self.raw_err, Fit_y)
         cost = -Fit_OTS().likelihood(self.EXPLORE.sigma, scaled_f, self.raw_I, self.raw_err)
@@ -121,7 +117,7 @@ class Fitting:
         axs.plot(self.raw_lambda, cost / np.nanmax(cost), 'b-', alpha=0.5, label='Cost')
         # axs.plot(Info[0], Info[1], 'g--', alpha=1, label='Code')
         plt.legend(loc='best')
-        plt.suptitle('{}'.format(np.sum(cost)))
+        plt.suptitle('Initial test\nCost={:.5g}'.format(np.sum(cost)))
         plt.show()
 
     def run_optimisation_model(self):
@@ -242,7 +238,6 @@ loglike_op = LogLike_nograd()
 # loglike_op = LogLikeWithGrad()
 
 if __name__ == '__main__':
-    print('main')
     ## Import data
     ###############################################################
     ##                                                           ##
@@ -258,7 +253,7 @@ if __name__ == '__main__':
     User = 'hpoole'
 
     ## Bools for what you want to run and if you want to save outputs
-    Save_info = True
+    Save_info = False
     Run_CMAES = True
     Run_MCMC = True
     Run_fits = True
@@ -271,6 +266,7 @@ if __name__ == '__main__':
     ##                                                           ##
     ###############################################################
     Global_loc = os.path.join('/', 'Users', User, 'Library', 'CloudStorage', 'Box-Box', 'TDYNO_NLUF', 'OMEGA', Shot_day, 'Data')
+    # Global_loc = os.path.join('/', 'Users', User, 'Documents', 'TDYNO', 'OMEGA', Shot_day, 'Data')
     Parent_loc = os.path.join(Global_loc, str(Shot_number), 'IAW')
 
     Raw_files_loc = os.path.join(Parent_loc, 'Scattering_strips')
@@ -296,7 +292,7 @@ if __name__ == '__main__':
 
         Run = Fitting(Shot_day, Shot_number, Shot_time, Raw_file)
         print('... Running initial test fit')
-        Run.initial_test()
+        # Run.initial_test()
 
         if Run_CMAES:
             print('... Running CMAES')
@@ -326,7 +322,6 @@ if __name__ == '__main__':
             plt.suptitle(f'{Shot_time}ps')
             plt.savefig(os.path.join(CMAES_loc, 'Best_fit.png'))
             plt.show()
-            # quit()
         else:
             try:
                 Best_inits = extract_cmaes_file(CMAES_loc, Exploration().params)
@@ -431,4 +426,4 @@ if __name__ == '__main__':
         if Save_info:
             plt.savefig(os.path.join(MCMC_loc, 'MCMC_fits.png'))
         plt.show()
-        sys.exit()
+        # sys.exit()
