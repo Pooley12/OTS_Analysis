@@ -686,8 +686,8 @@ if __name__ == "__main__":
     ## If using TDYNO_NLUF Box account, User as required in Parent_loc
     User = 'hpoole'
 
-    ## If you want to save output figures and info
-    ## NB: I haven't yet implemented this, so it will not save anything
+    ## If you want to save output info
+    ## NB: I haven't yet implemented this for the figures
     Save_bool = True
 
     ## If you have, and want to use the calibration files
@@ -750,6 +750,13 @@ if __name__ == "__main__":
         capsize=4, barsabove=True, linestyle='None', marker='D', markersize=2,
         alpha=0.5)
         axs.plot(Wavelengths, Scattering_intensities[i], color=cmap[i])
+        if Save_bool:
+            save_loc = os.path.join(Parent_loc, 'Scattering_strips')
+            if not os.path.exists(save_loc):
+                os.makedirs(save_loc)
+            time = Timings[i]   
+            array = np.array([Wavelengths, Scattering_intensities[i] / np.nanmax(Scattering_intensities[i]), Intensity_per_errors[i]])
+            np.savetxt(os.path.join(save_loc, '{:.5g}ps.txt'.format(time*1e3)), array.T)
     sm = plt.cm.ScalarMappable(cmap='jet', norm=plt.Normalize(vmin=Timings[0], vmax=Timings[-1]))
     plt.colorbar(sm, ax=axs, label='Time (ns)')
     plt.ylabel('Normalized Signal Intensity')
@@ -757,7 +764,7 @@ if __name__ == "__main__":
     plt.suptitle(f's{Shot_number} {Shot_info.Diagnostic} Thomson Scattering')
     plt.show()
 
-    quit()
+    sys.exit()
     #%%
     ## Comparing to old data (IGNORE THIS UNLESS HANNAH :) )    
 
