@@ -78,7 +78,7 @@ class Shot_information:
             self.Probe_start = 25
             self.Probe_duration = 1
             start_offset = -0.1
-            end_offset = 0.15
+            end_offset = 0.05
             self.Signal_time = [self.Probe_start+start_offset, self.Probe_start+self.Probe_duration+end_offset]
             self.Signal_wavelength = [self.Probe_wavelength-1.25, self.Probe_wavelength+1]
             self.Number_first_fiducial_on_streak = 2
@@ -87,7 +87,7 @@ class Shot_information:
             self.Probe_start = 27
             self.Probe_duration = 1
             start_offset = -0.1
-            end_offset = 0.25
+            end_offset = 0.05
             self.Signal_time = [self.Probe_start+start_offset, self.Probe_start+self.Probe_duration+end_offset]
             self.Signal_wavelength = [self.Probe_wavelength-1.25, self.Probe_wavelength+1]
             self.Number_first_fiducial_on_streak = 2
@@ -95,8 +95,8 @@ class Shot_information:
             self.T0 = 16.3
             self.Probe_start = 19
             self.Probe_duration = 1
-            start_offset = -0.1
-            end_offset = 0.15
+            start_offset = -0.125
+            end_offset = 0.0
             self.Signal_time = [self.Probe_start+start_offset, self.Probe_start+self.Probe_duration+end_offset]
             self.Signal_wavelength = [self.Probe_wavelength-1.25, self.Probe_wavelength+1]
             self.Number_first_fiducial_on_streak = 2
@@ -105,7 +105,7 @@ class Shot_information:
             self.Probe_start = 21
             self.Probe_duration = 1
             start_offset = 0.05
-            end_offset = 0.2
+            end_offset = 0.25
             self.Signal_time = [self.Probe_start+start_offset, self.Probe_start+self.Probe_duration+end_offset]
             self.Signal_wavelength = [self.Probe_wavelength-1.25, self.Probe_wavelength+1]
             self.Number_first_fiducial_on_streak = 2
@@ -114,18 +114,18 @@ class Shot_information:
             self.Probe_start = 23
             self.Probe_duration = 1
             start_offset = -0.2
-            end_offset = 0.45
+            end_offset = 0.05
             self.Signal_time = [self.Probe_start+start_offset, self.Probe_start+self.Probe_duration+end_offset]
-            self.Signal_wavelength = [self.Probe_wavelength-1.25, self.Probe_wavelength+1]
+            self.Signal_wavelength = [self.Probe_wavelength-0.7, self.Probe_wavelength+1]
             self.Number_first_fiducial_on_streak = 2
         elif self.Shot_number == 108616:
             self.T0 = 22.3
             self.Probe_start = 25
             self.Probe_duration = 1
             start_offset = 0.05
-            end_offset = 0.175
+            end_offset = 0.25
             self.Signal_time = [self.Probe_start+start_offset, self.Probe_start+self.Probe_duration+end_offset]
-            self.Signal_wavelength = [self.Probe_wavelength-1.25, self.Probe_wavelength+1]
+            self.Signal_wavelength = [self.Probe_wavelength-0.825, self.Probe_wavelength+1]
             self.Number_first_fiducial_on_streak = 2
         elif self.Shot_number == 108617:
             self.T0 = 16.3
@@ -142,13 +142,13 @@ class Shot_information:
             self.Probe_start = 28.5
             self.Probe_duration = 1
             start_offset = -0.125
-            end_offset = 0.225
+            end_offset = -0.025
             self.Signal_time = [self.Probe_start+start_offset, self.Probe_start+self.Probe_duration+end_offset]
             self.Signal_wavelength = [self.Probe_wavelength-1.25, self.Probe_wavelength+1]
             self.Number_first_fiducial_on_streak = 1
         else:
             print(f'Information for shot {self.Shot_number} has not been provided')
-            quit()
+            sys.exit()
 
     def get_system_info(self):
         """
@@ -214,16 +214,17 @@ class Fiducial_analysis:
     - The code looks for the p510 file in the shot number folder under a subfolder p510. If this does not exists, either the file path 
     self.p510_file needs to be edited, or the file needs to be downloaded from the Shot Report.
     """
-    def __init__(self, Shot_info, Parent_loc, Data_image):
+    def __init__(self, Shot_info, Parent_loc, Data_image, plot=False):
         self.Shot_info = Shot_info
         self.Data_image = Data_image
+        self.plot_bool = plot
         self.p510_file = os.path.join(Parent_loc.replace('IAW', 'p510'), f'p510_data_p510_data_{self.Shot_info.Shot_number}.hdf')
     
         self.get_p510_fiducial_info()
         self.get_fiducials_on_streak()
         self.Time_axis = self.get_time_axis()
 
-    def get_p510_fiducial_info(self, plot=False):
+    def get_p510_fiducial_info(self):
         """
         Extracts and processes fiducial timing information from a p510 HDF file. This provides the absolute timing 
         of the timing fiducials.
@@ -265,7 +266,7 @@ class Fiducial_analysis:
         ## Timing of first fiducial on the TS streak
         self.First_fiducial_time = Time[First_fiducial]
         
-        if plot:
+        if self.plot_bool:
             plt.figure()
             plt.xlabel('Time (ns)')
             plt.xlim(-2, 6)
@@ -274,7 +275,7 @@ class Fiducial_analysis:
             plt.axvline(self.First_fiducial_time, linestyle='--', color='k', label='First fiducial on streak')
             plt.legend()
 
-    def get_fiducials_on_streak(self, xy=(0, 40), width=1000, height=200, plot=False):
+    def get_fiducials_on_streak(self, xy=(0, 40), width=1000, height=200):
         """
         Identifies and analyzes fiducial peaks in a specified region of the streak camera image.
 
@@ -305,13 +306,13 @@ class Fiducial_analysis:
         Fiducial_signal = np.sum(Fiducial_image, axis=0)
         Fiducial_signal /= np.max(Fiducial_signal)
         Pixels = np.arange(len(Fiducial_signal))+xy[0]
-        Indexes = peakutils.peak.indexes(Fiducial_signal, min_dist=50)
+        Indexes = peakutils.peak.indexes(Fiducial_signal, min_dist=50, thres=0.6)
         Avg_fiducial_separation_pix = np.mean(np.diff(Indexes))
 
         self.First_fiducial_pixel = Pixels[Indexes[0]]
         self.Time_per_pixel = self.Shot_info.Fiducial_separation / Avg_fiducial_separation_pix
 
-        if plot:
+        if self.plot_bool:
             fig, axs = plt.subplots(2, 1, figsize=(5, 8), height_ratios=[2, 1], sharex=True)
             axs[0].imshow(self.Data_image, norm=LogNorm(), cmap='inferno', origin='lower')
             box = Rectangle(xy, width, height, fill=False, color='white', linewidth=2, alpha=0.65, label='Fiducial region')
@@ -396,7 +397,7 @@ class Data_calibration:
 
         self.Wavelength_axis = self.get_wavelength_axis()
 
-        self.illustrate_scattering_region()
+        # self.illustrate_scattering_region()
 
     def read_hdf(self, File_loc, plot=False):
         """
@@ -502,7 +503,7 @@ class Data_calibration:
 
         return Wavelength_axis
 
-    def illustrate_scattering_region(self):
+    def illustrate_scattering_region(self, save=False):
         """
         Visualizes the scattering region on the data image for a given shot.
 
@@ -530,6 +531,10 @@ class Data_calibration:
         axs.set_aspect('auto', adjustable='box')
         plt.legend()
         plt.suptitle(f's{self.Shot_info.Shot_number} {self.Shot_info.Diagnostic} Scattering Region')
+        axs.set_xlabel('Time (ns)')
+        axs.set_ylabel('Wavelength (nm)')
+        if save:
+            plt.savefig(os.path.join(self.Parent_loc, f'Scattering_region.png'), dpi=300)
         plt.show()
 
 class Data_extraction:
@@ -563,7 +568,7 @@ class Data_extraction:
         self.get_scattering_strips()
         self.bin_data()
 
-    def get_scattering_strips(self, polyorder=2, plot=False):
+    def get_scattering_strips(self, polyorder=1, plot=True):
         """
         Extracts the scattering signal from the data image.
 
@@ -598,19 +603,36 @@ class Data_extraction:
 
         ## Fit a polynomial to the background and subtract
         Npix = np.arange(Scattering_region.shape[0])
-        edge_width = max(10, int(0.2 * Scattering_region.shape[0]))  # Use 20% of pixels at each edge, at least 10 pixels
+        if self.Shot_info.Shot_number == 108615:
+            edge_width = max(10, int(0.15 * Scattering_region.shape[0]))  # Use 15% of pixels at each edge, at least 10 pixels
+        else:
+            edge_width = max(10, int(0.2 * Scattering_region.shape[0]))  # Use 20% of pixels at each edge, at least 10 pixels
         Signals = np.zeros_like(Scattering_region)
-        for f in range(Scattering_region.shape[1]):
+        for f in range(0, Scattering_region.shape[1], 1):
             Signal = Scattering_region[:, f]
             ## Use both edges of signal for background estimation
             Background_npix = np.concatenate((Npix[:edge_width], Npix[-edge_width:]))
             Background_signal = np.concatenate((Signal[:edge_width], Signal[-edge_width:]))
-            if np.max(Background_signal) >= 0.2*np.max(Signal):
-                print(f'Warning: Background signal may be too high at time {self.Time_axis[f]} ns')
             ## Fit a nth degree polynomial to the background
             coeffs = np.polyfit(Background_npix, Background_signal, deg=polyorder)
             Background_fit = np.polyval(coeffs, Npix)
             Signals[:, f] = Signal - Background_fit
+
+            if np.mean(Background_signal)+np.std(Background_signal) >= 0.2*np.max(Signal):
+            # if np.max(Background_signal) >= 0.2*np.max(Signal):
+                print(f'Warning: Background signal may be too high at time {self.Time_axis[f]} ns')
+                plt.figure()
+                plt.plot(Npix, Signal, label='Original Signal')
+                plt.plot(Background_npix, Background_signal, 'ro', label='Background Points')
+                plt.plot(Npix, Background_fit, 'g--', label='Background Fit')
+                plt.plot(Npix, Signals[:, f], label='Background Subtracted Signal')
+                plt.xlabel('Pixel')
+                plt.ylabel('Intensity')
+                plt.title(f'Time = {self.Time_axis[f]:.2f} ns')
+                plt.legend()
+                plt.show()
+
+        
         self.Scattering_strips = Signals
 
         if plot:
@@ -681,14 +703,14 @@ if __name__ == "__main__":
 
     ## Define the shot day, shot number, and diagnostic
     Shot_day = 'OMEGA_Jun2023'
-    Shot_number = 108617
+    Shot_number = 108618
 
     ## If using TDYNO_NLUF Box account, User as required in Parent_loc
     User = 'hpoole'
 
     ## If you want to save output info
-    ## NB: I haven't yet implemented this for the figures
-    Save_bool = True
+    ## NB: I haven't yet implemented this for all the figures
+    Save_bool = False
 
     ## If you have, and want to use the calibration files
     Calibration_bool = True
@@ -733,10 +755,10 @@ if __name__ == "__main__":
 
     ## Extract data image and perform calibration
     Data_info = Data_calibration(Shot_info, Parent_loc, Data_file_loc, Calibration_file_loc=Calibration_file_loc)
+    Data_info.illustrate_scattering_region(save=Save_bool)
 
     ## Generate the scattering data output
     Data_output = Data_extraction(Shot_info, Data_info)
-
     ###############################################################
     #%%
     ## Plot the scattering intensities 
@@ -764,7 +786,7 @@ if __name__ == "__main__":
     plt.suptitle(f's{Shot_number} {Shot_info.Diagnostic} Thomson Scattering')
     plt.show()
 
-    sys.exit()
+    # sys.exit()
     #%%
     ## Comparing to old data (IGNORE THIS UNLESS HANNAH :) )    
 
