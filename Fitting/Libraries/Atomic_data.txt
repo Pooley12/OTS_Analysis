@@ -20,7 +20,7 @@ At No  Symbol  Name		Atomic Wt
 16	S	Sulfur		32.06
 17	Cl	Chlorine	35.45
 18	Ar	Argon		39.95
-19	K	Potassium	39.0983	
+19	K	Potassium	39.0983
 20	Ca	Calcium	40.078	
 21	Sc	Scandium	44.955
 22	Ti	Titanium	47.867
