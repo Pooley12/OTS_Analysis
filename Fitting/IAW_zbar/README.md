@@ -167,9 +167,3 @@ The forward model implements the **Salpeter (1960) form factor** for a multi-spe
 - Solid-angle integration over the collection optic acceptance cone (`salpeter_range`)
 - Gaussian instrument function broadening
 - EOS-based mean ionisation (Zbar) lookup via `LinearNDInterpolator` on a PROPACEOS grid
-
-The scattering parameter is:
-
-$$\alpha = \frac{\kappa_e}{k} = \frac{1}{k \lambda_{De}}$$
-
-where $k$ is the scattering wavevector and $\lambda_{De}$ is the electron Debye length.
