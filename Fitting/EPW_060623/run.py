@@ -437,13 +437,13 @@ if __name__ == '__main__':
     User = 'hpoole'
 
     ## Bools for what you want to run and if you want to save outputs
-    Save_info = True
+    Save_info = False
     Use_IAW_data = True
-    Run_CMAES = False
+    Run_CMAES = True
     Only_CMAES = False
     Run_MCMC = True
-    Show_fits = False
-    Run_fits = False
+    Show_fits = True
+    Run_fits = True
 
     ## There are a few different options for running the EPW fitting.
     ## The main options are:
@@ -454,7 +454,7 @@ if __name__ == '__main__':
     ##    This is recommended if the breadth of the EPW signal is a result of a range of densities (ie you are trying to fit an ne_range)
     ## 3. Whether you want to include the range of scattering vectors
     ##    With EPW, I typically don't see much influence of the range of scattering vectors, so I typically don't include it in the fitting process as it slows it down
-    ## At the minute the catch for these model options are in Initialization.model_options
+    ## At the minute the catch for the model options are in Initialization.model_options
 
     ###############################################################
 
