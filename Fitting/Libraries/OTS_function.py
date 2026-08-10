@@ -9,8 +9,14 @@ import matplotlib.pyplot as plt
 from numpy import log10
 from scipy.interpolate import LinearNDInterpolator, griddata
 from matplotlib.colors import LogNorm
+from scipy.optimize import curve_fit
 
 class initialize():
+
+    def model_options(self, use_zbar_eos=True, use_range=True, fit_type='salpeter'):
+        self.use_zbar_eos = use_zbar_eos
+        self.use_range = use_range
+        self.fit_type = fit_type
 
     def material_params(self, materials, compositions, eos_file=None):
         self.materials = materials
@@ -38,7 +44,7 @@ class initialize():
         self.omgL = calculations.wavelength_to_omega(self.wavelength) # rad/s
         self.omg = calculations.wavelength_to_omega(self.wavelengths) # rad/s
 
-    def plasma_params(self, Te=None, Ti=None, ne=None, e_cur=None, flow=None, ionizations=None):
+    def plasma_params(self, Te=None, Ti=None, ne=None, e_cur=None, flow=None, ionizations=None, ne_range=None, v_grad=None):
         # Te, Ti in eV, ne in cm^-3, e_cur in nm, flow in nm
 
         if Te is None:
@@ -59,17 +65,27 @@ class initialize():
         if e_cur is None:
             pass
         else:
-            self.e_cur = e_cur * 1e-9  # m
+            self.e_cur = e_cur  # km/s
 
         if flow is None:
             pass
         else:
-            self.flow = flow * 1e-9  # m
+            self.flow = flow  # km/s
 
         if ionizations is None:
             pass
         else:
             self.ionizations = np.array(ionizations, dtype=float)
+
+        if ne_range is None:
+            pass
+        else:
+            self.ne_range = ne_range * 1e6  # m^-3
+
+        if v_grad is None:
+            pass
+        else:
+            self.v_grad = v_grad  # km/s
 
     def atomic_masses(self):
         ########## CALCULATE MEAN WEIGHT AND IONIZATION OF MATERIAL ##########
@@ -108,9 +124,15 @@ class initialize():
         if not os.path.exists(self.eos_file):
             raise FileNotFoundError(f"Grid file not found: {self.eos_file}")
 
+        T_min, T_max = 20, 1000 # eV
+        Ni_min, Ni_max = 4e18, 2e20 # cm^-3
         with np.load(self.eos_file) as npz:
-            ni_low, ni_high = 11, -16
-            t_low, t_high = 15, -2 #16, -2#-1
+            Ni_range = np.unique(npz['Ni'])  # cm^-3
+            Te_range = np.unique(npz['Te'])  # eV
+
+            ni_low, ni_high = np.argmin(np.abs(Ni_range - Ni_min)), np.argmin(np.abs(Ni_range - Ni_max))
+            t_low, t_high = np.argmin(np.abs(Te_range - T_min)), np.argmin(np.abs(Te_range - T_max))
+
             self.Te_grid = calculations.eV_to_K(npz['Te'][ni_low:ni_high, t_low:t_high])  # K
             self.Ne_grid = npz['Ne'][ni_low:ni_high, t_low:t_high]*1e6  # m^-3
             self.Ni_grid = npz['Ni'][ni_low:ni_high, t_low:t_high]*1e6  # m^-3
@@ -125,7 +147,7 @@ class initialize():
 
         ## I've shrunk the grid to increase interpolation speed; verify the ranges!!
         # plt.figure()
-        # plt.contourf(calculations.K_to_eV(self.Te_grid), self.Ni_grid*1e-6, np.log10(self.Ne_grid*1e-6), levels=10)#, norm=LogNorm(), levels=np.arange(5e19, 1e22, 5e19))
+        # plt.contourf(calculations.K_to_eV(self.Te_grid), self.Ni_grid*1e-6, self.Zbar_grid, levels=10)#, norm=LogNorm(), levels=np.arange(5e19, 1e22, 5e19))
         # plt.colorbar(label='Zbar')
         # plt.xlabel('Electron Temperature (eV)')
         # plt.ylabel('Ion Density (cm$^{-3}$)')
@@ -133,9 +155,20 @@ class initialize():
         # plt.xscale('log')
         # plt.yscale('log')
         # plt.show()
-        # print(np.shape(self.Te_grid), np.shape(self.Ne_grid))
+
+        # plt.figure()
+        # plt.contourf(calculations.K_to_eV(self.Te_grid), self.Ni_grid*1e-6, np.log10(self.Ne_grid*1e-6), levels=10)#, norm=LogNorm(), levels=np.arange(5e19, 1e22, 5e19))
+        # plt.colorbar(label='log10(Ne)')
+        # plt.xlabel('Electron Temperature (eV)')
+        # plt.ylabel('Ion Density (cm$^{-3}$)')
+        # plt.title('Electron Density from EOS Table')
+        # plt.xscale('log')
+        # plt.yscale('log')
+        # plt.show()
         # print(np.min(calculations.K_to_eV(self.Te_grid)), np.max(calculations.K_to_eV(self.Te_grid)))
         # print(np.min(self.Ne_grid)*1e-6, np.max(self.Ne_grid)*1e-6)
+        # print(np.min(self.Ni_grid)*1e-6, np.max(self.Ni_grid)*1e-6)
+        # sys.exit()
         
         ## Build and cache interpolators to avoid repeated expensive setup
         # Build interpolators using scattered-data ND interpolation because the Te/Ne grids are not guaranteed regular
@@ -174,6 +207,10 @@ class OTS():
         self.ANX = self.init.ANX
         self.ZAX = self.init.ZAX
 
+        self.use_zbar_eos = self.init.use_zbar_eos
+        self.use_range = self.init.use_range
+        self.fit_type = self.init.fit_type
+
         try:
             self.Te = self.init.Te
         except AttributeError:
@@ -198,21 +235,45 @@ class OTS():
             self.ionizations = self.init.ionizations
         except AttributeError:
             pass
+        try:
+            self.ne_range = self.init.ne_range
+        except AttributeError:
+            pass
+        try:
+            self.v_grad = self.init.v_grad
+        except AttributeError:
+            pass
 
-    def salpeter(self):
-        if self.Te <= 0.0 or self.Ti <= 0.0 or self.ne <= 0.0:
+    def salpeter(self, Te=None, Ti=None, ne=None):
+        if Te is None:
+            Te = self.Te
+        if Ti is None:
+            Ti = self.Ti
+        if ne is None:
+            ne = self.ne
+
+        if not hasattr(self, 'e_cur'):
+            e_cur = 0
+        else:
+            e_cur = self.e_cur
+        if not hasattr(self, 'flow'):
+            flow = 0
+        else:
+            flow = self.flow
+
+        if Te <= 0.0 or Ti <= 0.0 or ne <= 0.0:
             print("Error: Te, Ti, and ne must be set to positive values before calling salpeter().")
             return 0.0
     
-        self.dv = self.omgL*self.e_cur/self.wavelength
-        self.LS = self.omgL*self.flow/self.wavelength
+        self.dv = self.omgL*e_cur/self.wavelength
+        self.LS = self.omgL*flow/self.wavelength
 
         w = self.omg-self.omgL
 
-        self.wpe = calculations.plasma_frequency(self.ne) # rad/s
-        self.vte = calculations.thermal_velocity(self.Te, factor=2) # m/s
-        self.alpha = calculations.scattering_parameter(self.ne, self.Te, self.wavelength, self.theta)
-        self.k = calculations.scattering_wavevector(self.wavelength, self.theta, self.ne)
+        self.wpe = calculations.plasma_frequency(ne) # rad/s
+        self.vte = calculations.thermal_velocity(Te, factor=2) # m/s
+        self.alpha = calculations.scattering_parameter(ne, Te, self.wavelength, self.theta)
+        self.k = calculations.scattering_wavevector(self.wavelength, self.theta, ne)
 
         xe = (w - self.dv - self.LS) / (self.k * self.vte)
         we_r = 1-2*xe*calculations.dawson(xe)
@@ -222,7 +283,7 @@ class OTS():
         wi_i = 0.0
         for i in range(self.NSPEC):
             M = self.ANX[i] * cst.physical_constants['atomic mass constant'][0] # kg
-            vti = calculations.thermal_velocity(self.Ti, m=M, factor=2) # m/s
+            vti = calculations.thermal_velocity(Ti, m=M, factor=2) # m/s
             xi = (w - self.LS) / (self.k * vti)
             if self.ionizations[i] > self.ZAX[i]:
                 print('Error in Get_Atomic_info\n'
@@ -233,10 +294,10 @@ class OTS():
             wi_i += np.power(self.ionizations[i], 2) * self.fractions[i] * np.sqrt(np.pi) * xi * np.exp(-np.power(xi, 2))
 
         Ntot = np.sum(self.fractions*self.ionizations)
-        s1_r = 1.0 + (1.0 / Ntot) * np.power(self.alpha, 2) * (self.Te / self.Ti) * wi_r
-        s1_i = (1.0 / Ntot) * np.power(self.alpha, 2) * (self.Te / self.Ti) * wi_i
-        s2_r = 1.0 + np.power(self.alpha, 2) * we_r + (1.0 / Ntot) * np.power(self.alpha, 2) * (self.Te / self.Ti) * wi_r
-        s2_i = np.power(self.alpha, 2) * we_i + (1.0 / Ntot) * np.power(self.alpha, 2) * (self.Te / self.Ti) * wi_i
+        s1_r = 1.0 + (1.0 / Ntot) * np.power(self.alpha, 2) * (Te / Ti) * wi_r
+        s1_i = (1.0 / Ntot) * np.power(self.alpha, 2) * (Te / Ti) * wi_i
+        s2_r = 1.0 + np.power(self.alpha, 2) * we_r + (1.0 / Ntot) * np.power(self.alpha, 2) * (Te / Ti) * wi_r
+        s2_i = np.power(self.alpha, 2) * we_i + (1.0 / Ntot) * np.power(self.alpha, 2) * (Te / Ti) * wi_i
         s3_r = -np.power(self.alpha, 2) * we_r
         s3_i = -np.power(self.alpha, 2) * we_i
         
@@ -247,15 +308,31 @@ class OTS():
         ans = abs(s1 / s2) ** 2 * np.exp(-np.power(xe, 2)) / (self.k * np.sqrt(np.pi) * self.vte)
         for i in range(self.NSPEC):
             M = self.ANX[i] * cst.physical_constants['atomic mass constant'][0] # kg
-            vti = calculations.thermal_velocity(self.Ti, m=M, factor=2) # m/s
+            vti = calculations.thermal_velocity(Ti, m=M, factor=2) # m/s
             xi = (w - self.LS) / (self.k * vti)
             ans += np.power(self.ionizations[i], 2) * self.fractions[i] / Ntot * abs(s3 / s2) ** 2 * np.exp(-np.power(xi, 2)) / (self.k * np.sqrt(np.pi) * vti)
         self.output_x = self.wavelengths
         self.output_I = ans
         return self.output_x, self.output_I
 
-    def salpeter_range(self):
-        if self.Te <= 0.0 or self.Ti <= 0.0 or self.ne <= 0.0:
+    def salpeter_range(self, Te=None, Ti=None, ne=None):
+        if Te is None:
+            Te = self.Te
+        if Ti is None:
+            Ti = self.Ti
+        if ne is None:
+            ne = self.ne
+        if not hasattr(self, 'e_cur'):
+            e_cur = 0
+        else:
+            e_cur = self.e_cur
+        if not hasattr(self, 'flow'):
+            flow = 0
+        else:
+            flow = self.flow
+
+        if Te <= 0.0 or Ti <= 0.0 or ne <= 0.0:
+            print("Error: Te, Ti, and ne must be set to positive values before calling salpeter().")
             return 0.0
         
         angddir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'angles')
@@ -265,16 +342,16 @@ class OTS():
         thetas = self.theta + angs
         sa_fractions = fangs
 
-        self.dv = self.omgL*self.e_cur/self.wavelength
-        self.LS = self.omgL*self.flow/self.wavelength
+        self.dv = self.omgL*e_cur/self.wavelength
+        self.LS = self.omgL*flow/self.wavelength
 
         w = self.omg-self.omgL
-        kappa_e = calculations.inverse_screening_length(self.ne, self.Te)
-        self.wpe = calculations.plasma_frequency(self.ne) # rad/s
-        self.vte = calculations.thermal_velocity(self.Te, factor=2) # m/s
+        kappa_e = calculations.inverse_screening_length(ne, Te)
+        self.wpe = calculations.plasma_frequency(ne) # rad/s
+        self.vte = calculations.thermal_velocity(Te, factor=2) # m/s
 
         # Vectorize the sal() function for speed using numpy broadcasting
-        ks = np.array([calculations.scattering_wavevector(self.wavelength, theta, self.ne) for theta in thetas])
+        ks = np.array([calculations.scattering_wavevector(self.wavelength, theta, ne) for theta in thetas])
 
         # Precompute constants and arrays for all ks
         Nw = len(self.wavelengths)
@@ -286,8 +363,6 @@ class OTS():
         dv = self.dv
         LS = self.LS
         vte = self.vte
-        Te = self.Te
-        Ti = self.Ti
         fractions = np.array(self.fractions)
         ionizations = np.array(self.ionizations)
         ANX = np.array(self.ANX)
@@ -342,6 +417,97 @@ class OTS():
         self.output_I = np.sum(Is * sa_fractions[:, np.newaxis], axis=0)
 
         return self.output_x, self.output_I
+
+    def density_range(self, use_range=False, fit_type='salpeter'):
+        def density_gaussian(x, mu, sig):
+            gaus = np.exp(-np.power(x - mu, 2) / (2 * np.power(sig, 2)))
+            return gaus/np.nanmax(gaus)
+
+        def get_spectral_fit_salpeter(ne, use_range):
+            if use_range:
+                out_lambda, out_I = self.salpeter_range(ne=ne)
+            else:
+                out_lambda, out_I = self.salpeter(ne=ne)
+            return out_lambda, out_I/np.nanmax(out_I)
+
+        def get_spectral_fit_bohm_gross(theta):
+            nes = np.logspace(18, 21, 1000) * 1e6  # m^-3
+            ne_array = density_gaussian(nes, self.ne, self.ne_range)
+            epw_peaks = calculations.bohm_gross_wavelength(self.wavelength, theta, self.Te, nes)
+            signal = epw_peaks * ne_array
+            signal /= np.nanmax(signal)
+            order = np.argsort(epw_peaks)
+            fit_lambda = epw_peaks[order]
+            fit_I = signal[order]
+
+            out_lambda = self.wavelengths
+            out_I = np.interp(out_lambda, fit_lambda, fit_I, left=0, right=0)
+            
+            return out_lambda, out_I/np.nanmax(out_I)
+
+        if fit_type == 'salpeter':
+            nes = np.logspace(18, 21, 5000) * 1e6  # m^-3
+            ne_array = density_gaussian(nes, self.ne, self.ne_range)
+            selection = np.arange(0.05, 1, 0.1)
+            spectral_functions = []
+            for s in range(-1, len(selection), 1):
+                if s == -1:
+                    ne = self.ne
+                    weight = 1.0
+                    out_lambda, out_I = get_spectral_fit_salpeter(ne, use_range)
+                    spectral_functions.append(out_I*weight)
+                else:
+                    weight = selection[s]
+                    ne = nes[np.where(ne_array >= weight)[0][0]]
+                    out_lambda, out_I = get_spectral_fit_salpeter(ne, use_range)
+                    spectral_functions.append(out_I*weight)
+                    ne = nes[np.where(ne_array >= weight)[0][-1]]
+                    out_lambda, out_I = get_spectral_fit_salpeter(ne, use_range)
+                    spectral_functions.append(out_I*weight)
+
+            spectral_functions = np.array(spectral_functions)
+            max_Is = np.nanmax(spectral_functions, axis=1)
+            max_lambdas = out_lambda[np.nanargmax(spectral_functions, axis=1)]
+            central_lambda = max_lambdas[0]
+
+            order = np.argsort(max_lambdas)
+            max_lambdas = max_lambdas[order]
+            max_Is = max_Is[order]
+            popt, pcov = curve_fit(density_gaussian, max_lambdas*1e9, max_Is, p0=[central_lambda*1e9, 5], maxfev=20000)
+            out_I = density_gaussian(out_lambda*1e9, *popt)
+
+            # plt.figure()
+            # for f in range(len(spectral_functions)):
+            #     plt.plot(out_lambda*1e9, spectral_functions[f])
+            # plt.plot(max_lambdas*1e9, max_Is, 'k-', label='Max Intensity')
+            # plt.plot(out_lambda*1e9, out_I, 'r--', label='Gaussian Fit')
+            # plt.xlabel('Wavelength (nm)')
+            # plt.ylabel('Normalized Intensity')
+            # plt.title('Spectral Functions for Different Electron Densities')
+            # plt.show()
+
+        elif fit_type == 'bohm-gross':
+            nes = np.logspace(18, 21, 1000) * 1e6  # m^-3
+            ne_array = density_gaussian(nes, self.ne, self.ne_range)
+            if use_range:
+                angddir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'angles')
+                angs = np.deg2rad(np.load(angddir + '/angOMEGA.npy'))
+                fangs = np.load(angddir + '/fangOMEGA.npy')
+            
+                thetas = self.theta + angs
+                sa_fractions = fangs
+                spectral_functions = []
+                for s in range(len(thetas)):
+                    theta = thetas[s]
+                    out_lambda, out_I = get_spectral_fit_bohm_gross(theta)
+                    spectral_functions.append(out_I*sa_fractions[s])
+                spectral_functions = np.asarray(spectral_functions)
+                out_I = np.sum(spectral_functions, axis=0)
+                out_I = out_I/np.nanmax(out_I)
+            else:
+                out_lambda, out_I = get_spectral_fit_bohm_gross(self.theta)
+
+        return out_lambda, out_I
 
     def kangsm(self):
         ## This is an approximation for the spectral broadening, from C. Bruulsema (2022)
@@ -421,22 +587,27 @@ class OTS():
                 self.Te = calculations.eV_to_K(params[i]) # K
             elif lname in ['TI', 'ION_TEMP', 'ION_TEMPERATURE']:
                 self.Ti = calculations.eV_to_K(params[i]) # K
-            elif lname in ['NE', 'ELECTRON_DENSITY']:
+            elif lname in ['NE', 'ELECTRON_DENSITY', 'E_DENSITY']:
                 self.ne = params[i] * 1e6 # m^-3
             elif lname in ['E_CURRENT', 'E_CUR', 'ELECTRON_CURRENT']:
-                e_cur = params[i] # km/s
+                self.e_cur = params[i] # km/s
             elif lname in ['FLOW']:
-                flow = params[i] # km/s
+                self.flow = params[i] # km/s
             elif lname in ['VELOCITY_GRADIENT', 'V_GRAD']:
-                v_grad = params[i] # km/s
+                self.v_grad = params[i] # km/s
+            elif lname in ['NE_RANGE', 'ELECTRON_DENSITY_RANGE', 'NE_GRADIENT']:
+                self.ne_range = params[i] * 1e6 # m^-3
             else:
                 print(f"Error: Unrecognized parameter name '{name}'.")
                 sys.exit()
             
         k = calculations.scattering_wavevector(self.wavelength, self.theta, self.ne)
-        self.e_cur = calculations.kms_to_nm(e_cur, self.wavelength, k)*1e-9 # m
-        self.flow = calculations.kms_to_nm(flow, self.wavelength, k)*1e-9 # m
-        self.v_grad = calculations.kms_to_nm(v_grad, self.wavelength, k)*1e-9 # m
+        if hasattr(self, 'e_cur'):
+            self.e_cur = calculations.kms_to_nm(self.e_cur, self.wavelength, k)*1e-9 # m
+        if hasattr(self, 'flow'):
+            self.flow = calculations.kms_to_nm(self.flow, self.wavelength, k)*1e-9 # m
+        if hasattr(self, 'v_grad'):
+            self.v_grad = calculations.kms_to_nm(self.v_grad, self.wavelength, k)*1e-9 # m
 
     def add_velocity_gradient(self, Fit_lambda, Fit_I):
         ## ADD ARCHIES PAPER
@@ -468,7 +639,7 @@ class OTS():
 
         ## If any entries are NaN (outside convex hull) fallback to nearest for those entries only.
         if z_interp is None or np.any(np.isnan(z_interp)):
-            print("Warning: Some Zbar interpolation points outside EOS grid convex hull; using nearest-neighbor fallback.")
+            print(f"Warning {round(calculations.K_to_eV(te), 2)}, {round(ne*1e-6, 2)}: Some Zbar interpolation points outside EOS grid convex hull; using nearest-neighbor fallback.")
             z_nearest = griddata(pts, vals_matrix, tgt, method='nearest')
             if z_interp is None:
                 z_interp = z_nearest
@@ -506,15 +677,18 @@ class OTS():
         # print(self.ionizations)
         return
 
-    def run_fitting(self, params, names, use_zbar_eos=False, use_range=False):
+    def run_fitting(self, params, names):
         self.param_conversions(params, names)
-        if use_zbar_eos:
+        if self.use_zbar_eos:
             self.zbar_from_eos(max(self.Te, self.Ti), self.ne)
             # self.zbar_from_eos_save(self.Te, self.ne)
-        if use_range:
-            out_lambda, out_I = self.salpeter_range()
+        if hasattr(self, 'ne_range'):
+            out_lambda, out_I = self.density_range(use_range=self.use_range, fit_type=self.fit_type)
         else:
-            out_lambda, out_I = self.salpeter()
+            if self.use_range:
+                out_lambda, out_I = self.salpeter_range()
+            else:
+                out_lambda, out_I = self.salpeter()
         if hasattr(self, 'v_grad'):
             if self.v_grad >= 1e-20:
                 out_I = self.add_velocity_gradient(out_lambda, out_I)
@@ -601,24 +775,6 @@ class calculations():
         u = x * gamma(o+1)
         return fdint.ifdk(o, u)
     
-    def real_plasma_dispersion_chat(x, alpha):
-        # study later...
-        # x = (omega - dv - LS)/(k*vte)
-        # alpha = 1/(k*lambda_D)
-        sqrt_pi = np.sqrt(cst.pi)
-        if alpha < 0.1:
-            # Use small alpha expansion
-            term1 = 1 - 2*x*calculations.dawson(x)
-            term2 = (2/3)*np.power(alpha, 2)*(1 - 4*x*calculations.dawson(x) + 4*(x**2)*(1 - 2*x*calculations.dawson(x)))
-            term3 = (1/15)*np.power(alpha, 4)*(3 - 24*x*calculations.dawson(x) + 48*(x**2)*(1 - 2*x*calculations.dawson(x)) + 16*(x**3)*(-3 + 4*x*calculations.dawson(x) - 4*(x**2)*(1 - 2*x*calculations.dawson(x))))
-            return term1 + term2 + term3
-        elif alpha > 10:
-            # Use large alpha expansion
-            return (np.power(alpha, -2))*(1 + 3*np.power(alpha, -2) + 15*np.power(alpha, -4) + 105*np.power(alpha, -6)) + np.sqrt(cst.pi)*x*np.exp(-np.power(x, 2))
-        else:
-            # Use exact expression
-            return 1 + np.power(alpha, 2)*(1 - 2*x*calculations.dawson(x))
-    
     def eV_to_K(T):
         # T in eV
         return T*(cst.physical_constants['electron volt-kelvin relationship'][0])
@@ -664,49 +820,66 @@ class calculations():
 #     def scattering_params(self):
 #         # Wavelength in nm, Angle in degrees
 
-#         self.wavelength_min = 525.75  # nm
-#         self.wavelength_max = 527  # nm
-#         self.wavelength_step = 0.001  # nm
+#         self.wavelength_min = 430  # nm
+#         self.wavelength_max = 455  # nm
+#         self.wavelength_step = 0.05  # nm
 
-#         self.wavelength_fwhm = 0.06672  # nm
+#         self.wavelength_fwhm = 3.208  # nm
 #         self.wavelength = 1053/2  # nm
 #         self.theta = 59.9  # degrees
 #         self.wavelengths = np.arange(self.wavelength_min, self.wavelength_max, self.wavelength_step)  # nm
 
-#         # self.omgL = calculations.wavelength_to_omega(self.wavelength*1e-9) # rad/s
-#         # self.omg = calculations.wavelength_to_omega(self.wavelengths*1e-9) # rad/s
-
 #     def material_params(self):
 #         # Material parameters
 #         self.elements = ['C', 'H', 'Cl']
-#         self.fractions = [0.499, 0.428, 0.063]  # Relative fractions of each element
+#         self.fractions = [0.499, 0.438, 0.063]  # Relative fractions of each element
 #         self.zs = [6, 1, 17]  # Ionisation states
 #         self.eos_file = '/Users/hpoole/Documents/Simulations/PROPACEOS/C49_9H43_8Cl6_3/grid_data.npz'
 
-#         self.ne = 1e20 # 1/cc
+#         ## Fixed parameters
+#         self.e_cur = 0 # km/s
+#         self.flow = 0 # km/s
 
 #     def input(self):
 #         OTS_init = initialize()
 #         OTS_init.scattering_params(self.wavelength, self.theta, self.wavelength_fwhm, self.wavelength_min, self.wavelength_max, self.wavelength_step)
 #         OTS_init.material_params(self.elements, self.fractions, eos_file=self.eos_file)
-#         OTS_init.plasma_params(ionizations=self.zs, ne=self.ne)
+#         OTS_init.plasma_params(ionizations=self.zs, e_cur=self.e_cur, flow=self.flow)
 #         return OTS_init
+
     
 # ME_INIT = Initialization()
 # OTS_MODEL = OTS(ME_INIT.OTS_init)
 
-# param_names = ['TE', 'TI', 'E_CURRENT', 'FLOW', 'VELOCITY_GRADIENT']
-# param_inits = [235, 139, 11.5, 55, 59]
-# import time
-# from concurrent.futures import ThreadPoolExecutor, as_completed
-# start_time = time.time()
-# OTS_MODEL.run_fitting(param_inits, param_names, use_zbar_eos=True)
-# end_time = time.time()
-# t1 = end_time - start_time
-# print(f"Fitting took {t1} seconds")
-# start_time = time.time()
-# OTS_MODEL.run_fitting(param_inits, param_names, use_zbar_eos=False)
-# end_time = time.time()
-# t2 = end_time - start_time
-# print(f"Fitting without Zbar EOS took {t2} seconds")
-# print(f"Zbar EOS fitting is x{t1/t2} times slower than without")
+# param_names = ['TE', 'TI', 'NE', 'NE_RANGE']
+# param_units = ['eV', 'eV', '1/cc', '1/cc']
+
+# param_inits = [358, 85, 1.4e20, 1.7e19]
+
+# # import time
+# # start_time = time.time()
+# # # fit_x1, fit_y1 = OTS_MODEL.run_fitting(param_inits, param_names, use_zbar_eos=True, fit_type='salpeter', use_range=True)
+# # fit_x2, fit_y2 = OTS_MODEL.run_fitting(param_inits, param_names, use_zbar_eos=True, fit_type='salpeter', use_range=False)
+
+# # end_time = time.time()
+# # t1 = end_time - start_time
+# # print(f"Fitting with Salpeter took {t1} seconds")
+# # start_time = time.time()
+# # # fit_x3, fit_y3 = OTS_MODEL.run_fitting(param_inits, param_names, use_zbar_eos=True, fit_type='bohm-gross', use_range=True)
+# # fit_x4, fit_y4 = OTS_MODEL.run_fitting(param_inits, param_names, use_zbar_eos=True, fit_type='bohm-gross', use_range=False)
+
+
+# # end_time = time.time()
+# # t2 = end_time - start_time
+# # print(f"Fitting with Bohm-Gross took {t2} seconds")
+# # # # print(f"Zbar EOS fitting is x{t1/t2} times slower than without")
+
+# # plt.figure()
+# # # plt.plot(fit_x1*1e9, fit_y1, label='Salpeter Range', color='blue')
+# # plt.plot(fit_x2*1e9, fit_y2, label='Salpeter', color='orange')
+# # # plt.plot(fit_x3*1e9, fit_y3, label='Bohm-Gross Range', color='green')
+# # plt.plot(fit_x4*1e9, fit_y4, label='Bohm-Gross', color='red')
+# # plt.xlabel('Wavelength (nm)')
+# # plt.ylabel('Intensity')
+# # plt.legend()
+# # plt.show()
